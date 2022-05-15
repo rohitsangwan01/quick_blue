@@ -72,6 +72,24 @@ std::string to_uuidstr(winrt::guid guid) {
   return std::string{ chars };
 }
 
+static IAsyncOperation<GattDeviceServicesResult> GetGattServicesAsync(BluetoothLEDevice device) {
+    try {
+        return co_await device.GetGattServicesAsync();
+    } catch(winrt::hresult_error const& ex) {
+        OutputDebugString((L"GetGattServicesAsync " + ex.message() + L"\n").c_str());
+        return nullptr;
+    }
+}
+
+static IAsyncOperation<GattCharacteristicsResult> GetCharacteristicsAsync(GattDeviceService service) {
+    try {
+        return co_await service.GetCharacteristicsAsync();
+    } catch(winrt::hresult_error const& ex) {
+        OutputDebugString((L"GetCharacteristicsAsync " + ex.message() + L"\n").c_str());
+        return nullptr;
+    }
+}
+
 struct BluetoothDeviceAgent {
   BluetoothLEDevice device;
   winrt::event_token connnectionStatusChangedToken;
@@ -89,8 +107,8 @@ struct BluetoothDeviceAgent {
 
   IAsyncOperation<GattDeviceService> GetServiceAsync(std::string service) {
     if (gattServices.count(service) == 0) {
-      auto serviceResult = co_await device.GetGattServicesAsync();
-      if (serviceResult.Status() != GattCommunicationStatus::Success)
+      auto serviceResult = co_await GetGattServicesAsync(device);
+      if (serviceResult == nullptr || serviceResult.Status() != GattCommunicationStatus::Success)
         co_return nullptr;
 
       for (auto s : serviceResult.Services())
@@ -104,8 +122,8 @@ struct BluetoothDeviceAgent {
     if (gattCharacteristics.count(characteristic) == 0) {
       auto gattService = co_await GetServiceAsync(service);
 
-      auto characteristicResult = co_await gattService.GetCharacteristicsAsync();
-      if (characteristicResult.Status() != GattCommunicationStatus::Success)
+      auto characteristicResult = co_await GetCharacteristicsAsync(gattService);
+      if (characteristicResult == nullptr || characteristicResult.Status() != GattCommunicationStatus::Success)
         co_return nullptr;
 
       for (auto c : characteristicResult.Characteristics())
@@ -383,8 +401,10 @@ std::unique_ptr<flutter::StreamHandlerError<EncodableValue>> QuickBlueWindowsPlu
 winrt::fire_and_forget QuickBlueWindowsPlugin::ConnectAsync(uint64_t bluetoothAddress) {
   auto device = co_await BluetoothLEDevice::FromBluetoothAddressAsync(bluetoothAddress);
   auto servicesResult = co_await device.GetGattServicesAsync();
-  if (servicesResult.Status() != GattCommunicationStatus::Success) {
-    OutputDebugString((L"GetGattServicesAsync error: " + winrt::to_hstring((int32_t)servicesResult.Status()) + L"\n").c_str());
+  if (servicesResult == nullptr || servicesResult.Status() != GattCommunicationStatus::Success) {
+    if(servicesResult != nullptr)
+        OutputDebugString((L"GetGattServicesAsync error: " + winrt::to_hstring((int32_t)servicesResult.Status()) + L"\n").c_str());
+
     message_connector_->Send(EncodableMap{
       {"deviceId", std::to_string(bluetoothAddress)},
       {"ConnectionState", "disconnected"},
@@ -425,8 +445,9 @@ void QuickBlueWindowsPlugin::CleanConnection(uint64_t bluetoothAddress) {
 }
 
 winrt::fire_and_forget QuickBlueWindowsPlugin::DiscoverServicesAsync(BluetoothDeviceAgent &bluetoothDeviceAgent) {
-  auto serviceResult = co_await bluetoothDeviceAgent.device.GetGattServicesAsync();
-  if (serviceResult.Status() != GattCommunicationStatus::Success) {
+  auto serviceResult = co_await GetGattServicesAsync(bluetoothDeviceAgent.device);
+
+  if (serviceResult == nullptr || serviceResult.Status() != GattCommunicationStatus::Success) {
     message_connector_->Send(
       EncodableMap{
         {"deviceId", std::to_string(bluetoothDeviceAgent.device.BluetoothAddress())},
@@ -437,13 +458,14 @@ winrt::fire_and_forget QuickBlueWindowsPlugin::DiscoverServicesAsync(BluetoothDe
   }
 
   for (auto s : serviceResult.Services()) {
-    auto characteristicResult = co_await s.GetCharacteristicsAsync();
+    auto characteristicResult = co_await GetCharacteristicsAsync(s);
+
     auto msg = EncodableMap{
       {"deviceId", std::to_string(bluetoothDeviceAgent.device.BluetoothAddress())},
       {"ServiceState", "discovered"},
       {"service", to_uuidstr(s.Uuid())}
     };
-    if (characteristicResult.Status() == GattCommunicationStatus::Success) {
+    if (characteristicResult != nullptr && characteristicResult.Status() == GattCommunicationStatus::Success) {
       EncodableList characteristics;
       for (auto c : characteristicResult.Characteristics()) {
         characteristics.push_back(to_uuidstr(c.Uuid()));
