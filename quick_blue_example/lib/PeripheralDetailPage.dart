@@ -81,7 +81,7 @@ class _PeripheralDetailPageState extends State<PeripheralDetailPage> {
                   QuickBlue.connect(widget.deviceId);
                 },
               ),
-              if(Platform.isWindows)
+              if(Platform.isWindows || Platform.isAndroid)
                 RaisedButton(
                   child: Text('pair'),
                   onPressed: () {

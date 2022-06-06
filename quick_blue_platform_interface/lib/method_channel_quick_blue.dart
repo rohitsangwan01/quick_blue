@@ -144,7 +144,8 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   
   @override
   void pair(String deviceId) {
-    if(!Platform.isWindows)throw UnimplementedError();
+    bool supportedPlatforms = Platform.isAndroid || Platform.isWindows;
+    if(!supportedPlatforms)throw UnimplementedError();
     _method.invokeMethod('pair', {
       'deviceId': deviceId,
     }).then((_) => _log('pair invokeMethod success'));
